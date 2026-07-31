@@ -277,11 +277,16 @@ function drawNext() {
         if (c < minC) minC = c;
         if (c > maxC) maxC = c;
       }
-  const offX = Math.floor((4 - (maxC - minC + 1)) / 2) - minC;
-  const offY = Math.floor((4 - (maxR - minR + 1)) / 2) - minR;
+  const width = maxC - minC + 1;
+  const height = maxR - minR + 1;
+  const offXpx = (nextCanvas.width - width * NB) / 2 - minC * NB;
+  const offYpx = (nextCanvas.height - height * NB) / 2 - minR * NB;
+  nextCtx.save();
+  nextCtx.translate(offXpx, offYpx);
   for (let r = 0; r < shape.length; r++)
     for (let c = 0; c < shape[r].length; c++)
-      drawBlock(nextCtx, offX + c, offY + r, shape[r][c], NB);
+      drawBlock(nextCtx, c, r, shape[r][c], NB);
+  nextCtx.restore();
 }
 
 function endGame() {
