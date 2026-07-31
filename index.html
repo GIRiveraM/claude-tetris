@@ -14,39 +14,47 @@
 
       <aside class="panel">
         <div class="panel-section">
-          <span class="label">TEMA</span>
-          <label class="theme-switch">
+          <span class="label" id="label-theme">TEMA</span>
+          <label class="switch">
             <input type="checkbox" id="theme-toggle" aria-label="Cambiar entre modo oscuro y claro" />
             <span class="slider"></span>
           </label>
         </div>
 
         <div class="panel-section">
-          <span class="label">SCORE</span>
+          <span class="label" id="label-lang">IDIOMA</span>
+          <label class="switch">
+            <input type="checkbox" id="lang-toggle" aria-label="Cambiar idioma entre español e inglés" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="panel-section">
+          <span class="label" id="label-score">SCORE</span>
           <span class="value" id="score">0</span>
         </div>
         <div class="panel-section">
-          <span class="label">LINES</span>
+          <span class="label" id="label-lines">LINES</span>
           <span class="value" id="lines">0</span>
         </div>
         <div class="panel-section">
-          <span class="label">LEVEL</span>
+          <span class="label" id="label-level">LEVEL</span>
           <span class="value" id="level">1</span>
         </div>
 
         <div class="panel-section">
-          <span class="label">NEXT</span>
+          <span class="label" id="label-next">NEXT</span>
           <canvas id="next-canvas" width="120" height="120"></canvas>
         </div>
 
         <div class="panel-section controls">
-          <span class="label">CONTROLS</span>
+          <span class="label" id="label-controls">CONTROLS</span>
           <ul>
-            <li><kbd>←</kbd><kbd>→</kbd> mover</li>
-            <li><kbd>↑</kbd> rotar</li>
-            <li><kbd>↓</kbd> bajar</li>
-            <li><kbd>Space</kbd> caída</li>
-            <li><kbd>P</kbd> pausa</li>
+            <li><kbd>←</kbd><kbd>→</kbd> <span id="ctrl-move">mover</span></li>
+            <li><kbd>↑</kbd> <span id="ctrl-rotate">rotar</span></li>
+            <li><kbd>↓</kbd> <span id="ctrl-softdrop">bajar</span></li>
+            <li><kbd>Space</kbd> <span id="ctrl-harddrop">caída</span></li>
+            <li><kbd>P</kbd> <span id="ctrl-pause">pausa</span></li>
           </ul>
         </div>
       </aside>

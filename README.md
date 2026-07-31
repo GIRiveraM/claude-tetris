@@ -44,6 +44,7 @@ Es una versión jugable del Tetris clásico con todas las mecánicas que esperar
 - **Niveles** que aumentan cada 10 líneas y aceleran la caída.
 - **Pausa** y **Game Over** con opción de reinicio.
 - **Toggle de tema claro/oscuro**: modo oscuro por defecto, con un switch en el panel lateral que cambia a modo claro y recuerda la preferencia entre recargas (`localStorage`).
+- **Toggle de idioma español/inglés**: switch en el panel lateral que traduce todos los labels de la interfaz (marcadores, controles, overlay de pausa/game over) y recuerda la preferencia entre recargas (`localStorage`).
 
 ---
 
@@ -88,7 +89,12 @@ Después abre `http://localhost:8000` en el navegador.
 | `Espacio` | Hard drop (caída instantánea)     |
 | `P`       | Pausar / reanudar                 |
 
-También hay un switch de **tema claro/oscuro** en el panel lateral (arriba del `SCORE`) que se controla con el mouse/touch.
+También hay dos switches en la parte superior del panel lateral, controlados con mouse/touch:
+
+- **Tema claro/oscuro**.
+- **Idioma español/inglés**: traduce en vivo todos los labels del panel (`SCORE`/`LINES`/`LEVEL`/`NEXT`/`CONTROLS`, la lista de controles) y los textos del overlay (`GAME OVER`, `PAUSA`, puntuación).
+
+Ambas preferencias se guardan en `localStorage` (`theme` y `lang`) y se restauran al recargar la página.
 
 ---
 
@@ -101,7 +107,7 @@ El juego se compone de tres archivos que cooperan:
 Define la estructura visual:
 
 - Un `<canvas id="board">` de **300 × 600** píxeles donde se renderiza el tablero.
-- Un panel lateral con el switch de tema, `SCORE`, `LINES`, `LEVEL`, vista de la siguiente pieza y la lista de controles.
+- Un panel lateral con los switches de tema e idioma, `SCORE`, `LINES`, `LEVEL`, vista de la siguiente pieza y la lista de controles.
 - Un overlay para los estados **PAUSA** y **GAME OVER**.
 
 ### 2. `style.css`
@@ -121,6 +127,7 @@ Contiene toda la lógica del juego. A grandes rasgos:
 - **Puntuación**: usa la tabla clásica `[0, 100, 300, 500, 800]` multiplicada por el nivel actual; el hard drop suma 2 puntos por celda recorrida y el soft drop 1 punto por fila.
 - **Nivel y velocidad**: el nivel sube cada 10 líneas; la velocidad de caída se calcula como `max(100, 1000 − (level − 1) × 90)` milisegundos.
 - **Ghost piece** (`ghostY`): proyecta la posición final de la pieza actual hacia abajo y la dibuja con `globalAlpha = 0.2`.
+- **Idioma** (`I18N`, `applyLanguage`): diccionario con las traducciones `es`/`en` de todos los labels estáticos y del overlay; `applyLanguage(lang)` actualiza el DOM y persiste la preferencia en `localStorage`, igual que `applyTheme` hace con el tema.
 
 ### Flujo del juego
 
