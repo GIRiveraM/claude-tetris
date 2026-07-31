@@ -28,6 +28,49 @@ const PIECES = [
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
 
+const I18N = {
+  es: {
+    theme: 'TEMA',
+    lang: 'IDIOMA',
+    score: 'PUNTUACIÓN',
+    lines: 'LÍNEAS',
+    level: 'NIVEL',
+    next: 'SIGUIENTE',
+    controls: 'CONTROLES',
+    ctrlMove: 'mover',
+    ctrlRotate: 'rotar',
+    ctrlSoftDrop: 'bajar',
+    ctrlHardDrop: 'caída',
+    ctrlPause: 'pausa',
+    gameOver: 'GAME OVER',
+    pause: 'PAUSA',
+    scoreLabel: 'Puntuación',
+    restart: 'Reiniciar',
+    themeAriaLabel: 'Cambiar entre modo oscuro y claro',
+    langAriaLabel: 'Cambiar idioma entre español e inglés',
+  },
+  en: {
+    theme: 'THEME',
+    lang: 'LANGUAGE',
+    score: 'SCORE',
+    lines: 'LINES',
+    level: 'LEVEL',
+    next: 'NEXT',
+    controls: 'CONTROLS',
+    ctrlMove: 'move',
+    ctrlRotate: 'rotate',
+    ctrlSoftDrop: 'drop',
+    ctrlHardDrop: 'hard drop',
+    ctrlPause: 'pause',
+    gameOver: 'GAME OVER',
+    pause: 'PAUSED',
+    scoreLabel: 'Score',
+    restart: 'Restart',
+    themeAriaLabel: 'Toggle dark and light mode',
+    langAriaLabel: 'Switch language between Spanish and English',
+  },
+};
+
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const nextCanvas = document.getElementById('next-canvas');
@@ -40,8 +83,21 @@ const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 const themeToggle = document.getElementById('theme-toggle');
+const langToggle = document.getElementById('lang-toggle');
+const labelThemeEl = document.getElementById('label-theme');
+const labelLangEl = document.getElementById('label-lang');
+const labelScoreEl = document.getElementById('label-score');
+const labelLinesEl = document.getElementById('label-lines');
+const labelLevelEl = document.getElementById('label-level');
+const labelNextEl = document.getElementById('label-next');
+const labelControlsEl = document.getElementById('label-controls');
+const ctrlMoveEl = document.getElementById('ctrl-move');
+const ctrlRotateEl = document.getElementById('ctrl-rotate');
+const ctrlSoftDropEl = document.getElementById('ctrl-softdrop');
+const ctrlHardDropEl = document.getElementById('ctrl-harddrop');
+const ctrlPauseEl = document.getElementById('ctrl-pause');
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
+let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, currentLang;
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
@@ -222,8 +278,9 @@ function drawNext() {
 function endGame() {
   gameOver = true;
   cancelAnimationFrame(animId);
-  overlayTitle.textContent = 'GAME OVER';
-  overlayScore.textContent = `Puntuación: ${score.toLocaleString()}`;
+  const t = I18N[currentLang];
+  overlayTitle.textContent = t.gameOver;
+  overlayScore.textContent = `${t.scoreLabel}: ${score.toLocaleString()}`;
   overlay.classList.remove('hidden');
 }
 
@@ -235,7 +292,8 @@ function togglePause() {
     loop(lastTime);
   } else {
     cancelAnimationFrame(animId);
-    overlayTitle.textContent = 'PAUSA';
+    const t = I18N[currentLang];
+    overlayTitle.textContent = t.pause;
     overlayScore.textContent = '';
     overlay.classList.remove('hidden');
   }
@@ -314,5 +372,42 @@ themeToggle.addEventListener('change', () => {
 });
 
 applyTheme(localStorage.getItem('theme') || 'dark');
+
+function applyLanguage(lang) {
+  currentLang = lang;
+  const t = I18N[lang];
+  document.documentElement.lang = lang;
+  labelThemeEl.textContent = t.theme;
+  labelLangEl.textContent = t.lang;
+  labelScoreEl.textContent = t.score;
+  labelLinesEl.textContent = t.lines;
+  labelLevelEl.textContent = t.level;
+  labelNextEl.textContent = t.next;
+  labelControlsEl.textContent = t.controls;
+  ctrlMoveEl.textContent = t.ctrlMove;
+  ctrlRotateEl.textContent = t.ctrlRotate;
+  ctrlSoftDropEl.textContent = t.ctrlSoftDrop;
+  ctrlHardDropEl.textContent = t.ctrlHardDrop;
+  ctrlPauseEl.textContent = t.ctrlPause;
+  restartBtn.textContent = t.restart;
+  themeToggle.setAttribute('aria-label', t.themeAriaLabel);
+  langToggle.setAttribute('aria-label', t.langAriaLabel);
+  langToggle.checked = lang === 'en';
+
+  if (gameOver) {
+    overlayTitle.textContent = t.gameOver;
+    overlayScore.textContent = `${t.scoreLabel}: ${score.toLocaleString()}`;
+  } else if (paused) {
+    overlayTitle.textContent = t.pause;
+  }
+}
+
+langToggle.addEventListener('change', () => {
+  const lang = langToggle.checked ? 'en' : 'es';
+  localStorage.setItem('lang', lang);
+  applyLanguage(lang);
+});
+
+applyLanguage(localStorage.getItem('lang') || 'es');
 
 init();
