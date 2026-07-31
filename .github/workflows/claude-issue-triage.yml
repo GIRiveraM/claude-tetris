@@ -1,0 +1,92 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Número de issue a re-analizar'
+        required: true
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    # Evita bucles: ignora eventos disparados por bots (incluido este mismo workflow).
+    # github.actor cubre issues y workflow_dispatch; github.event.sender solo issues.
+    if: ${{ !endsWith(github.actor, '[bot]') && !endsWith(github.event.sender.login, '[bot]') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Asegurar labels de triaje
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          # nombre|color|descripción — --force crea o actualiza, así el paso es idempotente
+          labels=(
+            "area:render|c5def5|Dibujo en canvas (draw/drawBlock)"
+            "area:pieces|c5def5|Piezas, colores, rotación, colisión"
+            "area:scoring|c5def5|Puntuación y niveles"
+            "area:controls|c5def5|Manejo de teclado"
+            "area:loop|c5def5|Loop principal / caída / lock"
+            "area:ui|c5def5|HTML/CSS, HUD, overlay"
+            "area:docs|c5def5|README/CLAUDE.md"
+            "sev:low|c2e0c6|Impacto cosmético o menor"
+            "sev:medium|f9d0c4|Comportamiento incorrecto visible"
+            "sev:high|e99695|Rompe el juego"
+            "size:XS|ededed|Cambio trivial (una línea/constante)"
+            "size:S|ededed|Una función o un archivo"
+            "size:M|ededed|Varias funciones o archivos"
+            "size:L|ededed|Cambia modelo de datos o loop principal"
+            "triaged|5319e7|Diagnosticado automáticamente por Claude"
+          )
+          for entry in "${labels[@]}"; do
+            IFS='|' read -r name color desc <<< "$entry"
+            gh label create "$name" --repo "$REPO" --color "$color" --description "$desc" --force
+          done
+
+      - name: Run Claude Code Triage
+        id: claude-triage
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Analiza el issue #${{ github.event.issue.number || inputs.issue_number }}
+            de ${{ github.repository }} y triájalo siguiendo estrictamente el contrato
+            en .github/ISSUE_TRIAGE.md (léelo primero, completo).
+
+            Pasos:
+            1. `gh issue view <num> --json title,body,labels,comments` para leer el
+               issue y ver si ya tiene un comentario de diagnóstico previo.
+            2. Lee CLAUDE.md y el código relevante (game.js, index.html, style.css)
+               según el mapa área→código del contrato, antes de concluir nada. No
+               diagnostiques sin haber abierto el archivo correspondiente.
+            3. Aplica labels con `gh issue edit <num> --add-label "..."` (uno de tipo,
+               1-2 de área, uno de severidad, uno de esfuerzo, más "triaged"). No
+               inventes labels fuera del set cerrado del contrato.
+            4. Busca comentario previo con el marcador `<!-- claude-triage -->` vía
+               `gh api repos/${{ github.repository }}/issues/<num>/comments`. Si
+               existe, actualízalo con `gh api --method PATCH
+               repos/${{ github.repository }}/issues/comments/<id> -f body=@archivo`.
+               Si no existe, créalo con `gh issue comment <num> --body-file archivo`.
+            5. No edites el título ni el cuerpo del issue.
+            6. Escribe el diagnóstico en español, siguiendo exactamente la plantilla
+               del contrato (resumen, causa raíz con file:line, archivos a tocar, plan
+               de solución paso a paso, criterios de aceptación, esfuerzo/riesgo/confianza).
+          claude_args: |
+            --allowed-tools "Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh label list:*),Bash(gh api:*),Bash(git log:*)"

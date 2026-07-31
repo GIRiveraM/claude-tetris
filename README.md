@@ -25,6 +25,7 @@ Implementación del clásico **Tetris** en JavaScript vanilla, usando HTML5 Canv
   - [Tecnologías](#tecnologías)
   - [Estructura del proyecto](#estructura-del-proyecto)
   - [Personalización](#personalización)
+  - [Automatización](#automatización)
   - [Licencia](#licencia)
 
 ---
@@ -156,10 +157,17 @@ Cuando una pieza recién generada ya colisiona al aparecer (`spawn`), se dispara
 
 ```
 03-tetris/
-├── index.html      # Estructura del DOM y canvas
-├── style.css       # Estilos del juego (dark theme)
-├── game.js         # Toda la lógica del Tetris (~300 líneas)
-└── README.md
+├── index.html          # Estructura del DOM y canvas
+├── style.css           # Estilos del juego (dark theme)
+├── game.js             # Toda la lógica del Tetris (~300 líneas)
+├── CLAUDE.md           # Guía del repo para Claude Code
+├── README.md
+└── .github/
+    ├── ISSUE_TRIAGE.md # Contrato de labels/diagnóstico para el triaje automático
+    └── workflows/
+        ├── claude.yml               # Responde a menciones @claude en issues/PRs
+        ├── claude-code-review.yml   # Revisión automática de cada PR
+        └── claude-issue-triage.yml  # Etiqueta y diagnostica issues nuevos/editados
 ```
 
 ---
@@ -178,6 +186,28 @@ Algunos parámetros fáciles de tunear en `game.js`:
 | `dropInterval` | Velocidad inicial de caída en ms         | `1000`                |
 
 > Si cambias `COLS`, `ROWS` o `BLOCK`, recuerda ajustar también `width` y `height` del `<canvas id="board">` en `index.html` para que coincida (`COLS × BLOCK` × `ROWS × BLOCK`).
+
+---
+
+## Automatización
+
+El repo usa [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) en tres workflows de GitHub Actions:
+
+| Workflow | Dispara con | Qué hace |
+| --- | --- | --- |
+| `claude.yml` | Comentario/issue/review que mencione `@claude` | Responde y ejecuta lo que se le pida |
+| `claude-code-review.yml` | Cada PR abierto/actualizado | Revisión de código automática |
+| `claude-issue-triage.yml` | Issue creado, editado o reabierto | Etiqueta y diagnostica el issue |
+
+**Triaje de issues:** al abrir o editar un issue, Claude lo lee junto con el código
+(`game.js`, `index.html`, `style.css`) y le asigna labels de un set cerrado —
+tipo (`bug`/`enhancement`/`question`/`documentation`), área (`area:render`,
+`area:pieces`, `area:scoring`, `area:controls`, `area:loop`, `area:ui`, `area:docs`),
+severidad (`sev:low/medium/high`) y esfuerzo (`size:XS/S/M/L`) — y publica un
+comentario con causa raíz, archivos a tocar, plan de solución paso a paso y criterios
+de aceptación. Si el issue se edita, actualiza ese mismo comentario en vez de crear uno
+nuevo. Reglas de etiquetado y la plantilla del diagnóstico viven en
+[`.github/ISSUE_TRIAGE.md`](.github/ISSUE_TRIAGE.md).
 
 ---
 
