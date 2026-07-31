@@ -193,6 +193,7 @@ function softDrop() {
 }
 
 function lockPiece() {
+  if (gameOver) return;
   merge();
   clearLines();
   spawn();
@@ -290,6 +291,7 @@ function drawNext() {
 }
 
 function endGame() {
+  if (gameOver) return;
   gameOver = true;
   cancelAnimationFrame(animId);
   const t = I18N[currentLang];
@@ -314,6 +316,7 @@ function togglePause() {
 }
 
 function loop(ts) {
+  if (paused || gameOver) return;
   const dt = ts - lastTime;
   lastTime = ts;
   dropAccum += dt;
@@ -326,6 +329,7 @@ function loop(ts) {
     }
   }
   draw();
+  if (gameOver) return;
   animId = requestAnimationFrame(loop);
 }
 
