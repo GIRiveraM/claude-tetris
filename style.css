@@ -126,6 +126,25 @@ body {
   border-radius: 4px;
 }
 
+/* ---- Modo desafío ---- */
+.challenge-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--value-color);
+}
+
+.challenge-goal {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.challenge-timer {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  color: var(--control-text);
+}
+
 /* ---- Switches (tema / idioma) ---- */
 .switch {
   position: relative;

@@ -23,6 +23,8 @@ const COLORS = [
   '#5c6bc0', // Y pentomino - indigo
   '#fafafa', // SINGLE - casi blanco (recompensa)
   '#37474f', // HOLLOW - gris azulado oscuro (reto)
+  '#616161', // GARBAGE - gris (modo desafío, reto 2)
+  '#795548', // PRESET - marrón (modo desafío, reto 3)
 ];
 
 const BOMB_EVERY_LINES = 5;    // cada cuántas líneas se abre la ventana de bomba
@@ -54,6 +56,22 @@ const T_SPIN_SCORES = [100, 200, 400, 600]; // por líneas limpiadas junto al T-
 const B2B_MULTIPLIER = 1.5;
 const PERFECT_CLEAR_BONUS = 3000; // × nivel
 const TOAST_MS = 900;             // duración del texto flotante
+
+// ---- Modo desafío ----
+const GARBAGE_COLOR = 18;
+const PRESET_COLOR = 19;
+const GARBAGE_INTERVAL_MS = 10000;  // reto 2: cada cuánto sube una fila de basura
+const PRESET_ROWS = 6;              // reto 3: filas pre-colocadas al inicio
+const PRESET_HOLES = 3;             // huecos por fila pre-colocada
+const INVISIBLE_REVEAL_MS = 400;    // reto 4: destello al fijar antes de desaparecer
+
+const CHALLENGES = [
+  { key: 'c1', goal: { type: 'lines', target: 40 }, timeLimit: 120000, mods: {} },
+  { key: 'c2', goal: { type: 'survive', target: 60000 }, timeLimit: null, mods: { garbage: true } },
+  { key: 'c3', goal: { type: 'preset' }, timeLimit: null, mods: { preset: true } },
+  { key: 'c4', goal: { type: 'lines', target: 10 }, timeLimit: null, mods: { invisible: true } },
+  { key: 'c5', goal: { type: 'lines', target: 15 }, timeLimit: null, mods: { reverseRotate: true } },
+];
 
 const PIECES = [
   null,
@@ -97,6 +115,22 @@ const I18N = {
     restart: 'Reiniciar',
     themeAriaLabel: 'Cambiar entre modo oscuro y claro',
     langAriaLabel: 'Cambiar idioma entre español e inglés',
+    mode: 'MODO',
+    modeAriaLabel: 'Cambiar entre modo clásico y modo desafío',
+    challenge: 'RETO',
+    challengeWon: 'RETO SUPERADO',
+    challengeFailed: 'RETO FALLIDO',
+    campaignWon: '¡DESAFÍO COMPLETADO!',
+    nextChallenge: 'Siguiente',
+    retry: 'Reintentar',
+    linesUnit: 'líneas',
+    secondsUnit: 's',
+    presetUnit: 'celdas',
+    c1Name: 'Reto 1: Limpieza rápida',
+    c2Name: 'Reto 2: Basura',
+    c3Name: 'Reto 3: Bloques fijos',
+    c4Name: 'Reto 4: Invisible',
+    c5Name: 'Reto 5: Rotación inversa',
   },
   en: {
     theme: 'THEME',
@@ -117,6 +151,22 @@ const I18N = {
     restart: 'Restart',
     themeAriaLabel: 'Toggle dark and light mode',
     langAriaLabel: 'Switch language between Spanish and English',
+    mode: 'MODE',
+    modeAriaLabel: 'Switch between classic mode and challenge mode',
+    challenge: 'CHALLENGE',
+    challengeWon: 'CHALLENGE CLEARED',
+    challengeFailed: 'CHALLENGE FAILED',
+    campaignWon: 'CAMPAIGN COMPLETE!',
+    nextChallenge: 'Next',
+    retry: 'Retry',
+    linesUnit: 'lines',
+    secondsUnit: 's',
+    presetUnit: 'cells',
+    c1Name: 'Challenge 1: Speed Clear',
+    c2Name: 'Challenge 2: Garbage',
+    c3Name: 'Challenge 3: Fixed Blocks',
+    c4Name: 'Challenge 4: Invisible',
+    c5Name: 'Challenge 5: Reverse Rotation',
   },
 };
 
@@ -145,11 +195,42 @@ const ctrlRotateEl = document.getElementById('ctrl-rotate');
 const ctrlSoftDropEl = document.getElementById('ctrl-softdrop');
 const ctrlHardDropEl = document.getElementById('ctrl-harddrop');
 const ctrlPauseEl = document.getElementById('ctrl-pause');
+const modeToggle = document.getElementById('mode-toggle');
+const labelModeEl = document.getElementById('label-mode');
+const challengeBox = document.getElementById('challenge-box');
+const labelChallengeEl = document.getElementById('label-challenge');
+const challengeNameEl = document.getElementById('challenge-name');
+const challengeGoalEl = document.getElementById('challenge-goal');
+const challengeTimerEl = document.getElementById('challenge-timer');
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, currentLang, bombArmed, lightningArmed, tintArmed, gravityArmed, freezeArmed, freezeRemaining, flash, gravityAnim, pentominoArmed, hollowArmed, forcedSingle, combo, b2bActive, lastActionWasRotate, toast, audioCtx;
+let challengeMode, challengeIndex, challengeState, challengeLinesStart, challengeElapsed, garbageAccum, revealUntil, overlayAction;
+
+function mods() {
+  return challengeMode && challengeState === 'running' ? CHALLENGES[challengeIndex].mods : {};
+}
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+}
+
+function fillPresetRows() {
+  for (let r = ROWS - PRESET_ROWS; r < ROWS; r++) {
+    board[r].fill(PRESET_COLOR);
+    const holes = new Set();
+    while (holes.size < PRESET_HOLES) holes.add(Math.floor(Math.random() * COLS));
+    for (const c of holes) board[r][c] = 0;
+  }
+}
+
+function pushGarbage() {
+  if (board[0].some(v => v !== 0)) { failChallenge(); return; }
+  board.shift();
+  const row = new Array(COLS).fill(GARBAGE_COLOR);
+  row[Math.floor(Math.random() * COLS)] = 0;
+  board.push(row);
+  current.y--;
+  if (collide(current.shape, current.x, current.y)) failChallenge();
 }
 
 function boundingBox(shape) {
@@ -253,8 +334,17 @@ function rotateCW(shape) {
   return result;
 }
 
+function rotateCCW(shape) {
+  const rows = shape.length, cols = shape[0].length;
+  const result = Array.from({ length: cols }, () => new Array(rows).fill(0));
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      result[cols - 1 - c][r] = shape[r][c];
+  return result;
+}
+
 function tryRotate() {
-  const rotated = rotateCW(current.shape);
+  const rotated = mods().reverseRotate ? rotateCCW(current.shape) : rotateCW(current.shape);
   const kicks = [0, -1, 1, -2, 2];
   for (const kick of kicks) {
     if (!collide(rotated, current.x + kick, current.y)) {
@@ -269,8 +359,10 @@ function tryRotate() {
 function merge() {
   for (let r = 0; r < current.shape.length; r++)
     for (let c = 0; c < current.shape[r].length; c++)
-      if (current.shape[r][c])
-        board[current.y + r][current.x + c] = current.shape[r][c];
+      if (current.shape[r][c]) {
+        const ny = current.y + r;
+        if (ny >= 0) board[ny][current.x + c] = current.shape[r][c]; // filas por encima del tablero (basura empujando) se descartan
+      }
 }
 
 function registerLinesCleared(cleared, lineScore = (LINE_SCORES[cleared] || 0) * level) {
@@ -507,7 +599,7 @@ function softDrop() {
 }
 
 function lockPiece() {
-  if (gameOver) return;
+  if (gameOver || (challengeMode && challengeState !== 'running')) return;
   const bomb = current.bomb;
   const lightning = current.lightning;
   const tint = current.tint;
@@ -521,6 +613,7 @@ function lockPiece() {
   if (tint) dye();
   if (gravity) triggerGravityEffect();
   if (freeze) freezeRemaining = FREEZE_DURATION_MS;
+  if (mods().invisible) revealUntil = performance.now() + INVISIBLE_REVEAL_MS;
   clearLines(tspin);
   spawn();
   updateHUD();
@@ -596,11 +689,13 @@ function draw() {
   }
 
   // board
-  for (let r = 0; r < ROWS; r++)
-    for (let c = 0; c < COLS; c++) {
-      if (gravitySkip && gravitySkip.has(`${r},${c}`)) continue;
-      drawBlock(ctx, c, r, board[r][c], BLOCK);
-    }
+  const hideBoard = mods().invisible && performance.now() > revealUntil;
+  if (!hideBoard)
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++) {
+        if (gravitySkip && gravitySkip.has(`${r},${c}`)) continue;
+        drawBlock(ctx, c, r, board[r][c], BLOCK);
+      }
 
   if (gravitySkip) {
     const progress = (performance.now() - gravityAnim.start) / GRAVITY_ANIM_MS;
@@ -706,16 +801,19 @@ function drawNext() {
 
 function endGame() {
   if (gameOver) return;
+  if (challengeMode && challengeState === 'running') { failChallenge(); return; }
   gameOver = true;
   cancelAnimationFrame(animId);
   const t = I18N[currentLang];
+  overlayAction = null;
   overlayTitle.textContent = t.gameOver;
   overlayScore.textContent = `${t.scoreLabel}: ${score.toLocaleString()}`;
+  restartBtn.textContent = t.restart;
   overlay.classList.remove('hidden');
 }
 
 function togglePause() {
-  if (gameOver) return;
+  if (gameOver || (challengeMode && challengeState !== 'running')) return;
   paused = !paused;
   if (!paused) {
     lastTime = performance.now();
@@ -723,8 +821,10 @@ function togglePause() {
   } else {
     cancelAnimationFrame(animId);
     const t = I18N[currentLang];
+    overlayAction = null;
     overlayTitle.textContent = t.pause;
     overlayScore.textContent = '';
+    restartBtn.textContent = t.restart;
     overlay.classList.remove('hidden');
   }
 }
@@ -745,17 +845,29 @@ function loop(ts) {
         lockPiece();
       }
     }
+    if (challengeMode && challengeState === 'running') {
+      challengeElapsed += dt;
+      if (mods().garbage) {
+        garbageAccum += dt;
+        if (garbageAccum >= GARBAGE_INTERVAL_MS) { garbageAccum = 0; pushGarbage(); }
+      }
+      updateChallengeHUD();
+      checkChallengeGoal();
+    }
   }
   draw();
-  if (gameOver) return;
+  if (gameOver || (challengeMode && challengeState !== 'running')) return;
   animId = requestAnimationFrame(loop);
 }
 
-function init() {
+function resetRound(keepProgress) {
   board = createBoard();
-  score = 0;
-  lines = 0;
-  level = 1;
+  if (!keepProgress) {
+    score = 0;
+    lines = 0;
+    level = 1;
+    dropInterval = 1000;
+  }
   paused = false;
   gameOver = false;
   bombArmed = false;
@@ -773,20 +885,105 @@ function init() {
   toast = null;
   flash = null;
   gravityAnim = null;
-  dropInterval = 1000;
   dropAccum = 0;
   lastTime = performance.now();
   next = randomPiece();
   spawn();
   updateHUD();
+  updateChallengeHUD();
   overlay.classList.add('hidden');
   cancelAnimationFrame(animId);
   animId = requestAnimationFrame(loop);
 }
 
+function init() {
+  challengeMode = false;
+  resetRound(false);
+}
+
+function startChallenge(index, keepProgress) {
+  challengeMode = true;
+  challengeIndex = index;
+  challengeState = 'running';
+  resetRound(keepProgress);
+  challengeLinesStart = lines;
+  challengeElapsed = 0;
+  garbageAccum = 0;
+  revealUntil = 0;
+  if (CHALLENGES[index].mods.preset) fillPresetRows();
+  updateChallengeHUD();
+}
+
+function restartGame() {
+  if (challengeMode) startChallenge(0, false);
+  else init();
+}
+
+function checkChallengeGoal() {
+  if (challengeState !== 'running') return;
+  const ch = CHALLENGES[challengeIndex];
+  const g = ch.goal;
+  const done = g.type === 'lines' ? lines - challengeLinesStart >= g.target
+             : g.type === 'survive' ? challengeElapsed >= g.target
+             : board.every(row => row.every(v => v !== PRESET_COLOR));
+  if (done) { winChallenge(); return; }
+  if (ch.timeLimit && challengeElapsed >= ch.timeLimit) failChallenge();
+}
+
+function winChallenge() {
+  if (challengeState !== 'running') return;
+  challengeState = 'won';
+  cancelAnimationFrame(animId);
+  const t = I18N[currentLang];
+  const isLast = challengeIndex === CHALLENGES.length - 1;
+  overlayTitle.textContent = isLast ? t.campaignWon : t.challengeWon;
+  overlayScore.textContent = `${t.scoreLabel}: ${score.toLocaleString()}`;
+  restartBtn.textContent = isLast ? t.restart : t.nextChallenge;
+  overlayAction = isLast ? () => startChallenge(0, false) : () => startChallenge(challengeIndex + 1, true);
+  overlay.classList.remove('hidden');
+}
+
+function failChallenge() {
+  if (challengeState !== 'running') return;
+  challengeState = 'failed';
+  cancelAnimationFrame(animId);
+  const t = I18N[currentLang];
+  overlayTitle.textContent = t.challengeFailed;
+  overlayScore.textContent = `${t.scoreLabel}: ${score.toLocaleString()}`;
+  restartBtn.textContent = t.retry;
+  overlayAction = () => startChallenge(challengeIndex, true);
+  overlay.classList.remove('hidden');
+}
+
+function updateChallengeHUD() {
+  if (!challengeMode) { challengeBox.classList.add('hidden'); return; }
+  challengeBox.classList.remove('hidden');
+  const t = I18N[currentLang];
+  const ch = CHALLENGES[challengeIndex];
+  challengeNameEl.textContent = t[`${ch.key}Name`];
+  const g = ch.goal;
+  if (g.type === 'lines') {
+    const done = Math.max(0, Math.min(lines - challengeLinesStart, g.target));
+    challengeGoalEl.textContent = `${done} / ${g.target} ${t.linesUnit}`;
+  } else if (g.type === 'survive') {
+    const remain = Math.max(0, g.target - challengeElapsed);
+    challengeGoalEl.textContent = `${Math.ceil(remain / 1000)} ${t.secondsUnit}`;
+  } else {
+    const remaining = board.reduce((acc, row) => acc + row.filter(v => v === PRESET_COLOR).length, 0);
+    challengeGoalEl.textContent = `${remaining} ${t.presetUnit}`;
+  }
+  if (ch.timeLimit) {
+    const remain = Math.max(0, ch.timeLimit - challengeElapsed);
+    const s = Math.ceil(remain / 1000);
+    challengeTimerEl.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  } else {
+    challengeTimerEl.textContent = '';
+  }
+}
+
 document.addEventListener('keydown', e => {
   if (e.code === 'KeyP') { togglePause(); return; }
-  if (paused || gameOver) return;
+  if (paused || gameOver || (challengeMode && challengeState !== 'running')) return;
   switch (e.code) {
     case 'ArrowLeft':
       if (!collide(current.shape, current.x - 1, current.y)) { current.x--; lastActionWasRotate = false; }
@@ -809,7 +1006,7 @@ document.addEventListener('keydown', e => {
   updateHUD();
 });
 
-restartBtn.addEventListener('click', init);
+restartBtn.addEventListener('click', () => (overlayAction || restartGame)());
 
 function applyTheme(theme) {
   document.body.classList.toggle('light', theme === 'light');
@@ -840,17 +1037,33 @@ function applyLanguage(lang) {
   ctrlSoftDropEl.textContent = t.ctrlSoftDrop;
   ctrlHardDropEl.textContent = t.ctrlHardDrop;
   ctrlPauseEl.textContent = t.ctrlPause;
-  restartBtn.textContent = t.restart;
   themeToggle.setAttribute('aria-label', t.themeAriaLabel);
   langToggle.setAttribute('aria-label', t.langAriaLabel);
   langToggle.checked = lang === 'en';
+  labelModeEl.textContent = t.mode;
+  modeToggle.setAttribute('aria-label', t.modeAriaLabel);
+  labelChallengeEl.textContent = t.challenge;
 
   if (gameOver) {
     overlayTitle.textContent = t.gameOver;
     overlayScore.textContent = `${t.scoreLabel}: ${score.toLocaleString()}`;
+    restartBtn.textContent = t.restart;
   } else if (paused) {
     overlayTitle.textContent = t.pause;
+    restartBtn.textContent = t.restart;
+  } else if (challengeMode && challengeState === 'won') {
+    const isLast = challengeIndex === CHALLENGES.length - 1;
+    overlayTitle.textContent = isLast ? t.campaignWon : t.challengeWon;
+    overlayScore.textContent = `${t.scoreLabel}: ${score.toLocaleString()}`;
+    restartBtn.textContent = isLast ? t.restart : t.nextChallenge;
+  } else if (challengeMode && challengeState === 'failed') {
+    overlayTitle.textContent = t.challengeFailed;
+    overlayScore.textContent = `${t.scoreLabel}: ${score.toLocaleString()}`;
+    restartBtn.textContent = t.retry;
+  } else {
+    restartBtn.textContent = t.restart;
   }
+  updateChallengeHUD();
 }
 
 langToggle.addEventListener('change', () => {
@@ -861,4 +1074,17 @@ langToggle.addEventListener('change', () => {
 
 applyLanguage(localStorage.getItem('lang') || 'es');
 
-init();
+function applyMode(mode) {
+  challengeMode = mode === 'challenge';
+  modeToggle.checked = challengeMode;
+  if (challengeMode) startChallenge(0, false);
+  else init();
+}
+
+modeToggle.addEventListener('change', () => {
+  const mode = modeToggle.checked ? 'challenge' : 'classic';
+  localStorage.setItem('mode', mode);
+  applyMode(mode);
+});
+
+applyMode(localStorage.getItem('mode') || 'classic');

@@ -17,6 +17,7 @@ Implementación del clásico **Tetris** en JavaScript vanilla, usando HTML5 Canv
     - [Opción 1: abrir el archivo directamente](#opción-1-abrir-el-archivo-directamente)
     - [Opción 2: servidor local (recomendado)](#opción-2-servidor-local-recomendado)
   - [Controles](#controles)
+  - [Modo Desafío](#modo-desafío)
   - [Cómo funciona](#cómo-funciona)
     - [1. `index.html`](#1-indexhtml)
     - [2. `style.css`](#2-stylecss)
@@ -54,6 +55,7 @@ Es una versión jugable del Tetris clásico con todas las mecánicas que esperar
 - **Modo combo y multiplicadores**: limpiar líneas en fijadas consecutivas multiplica la puntuación de esa limpieza (×1, ×2, ×3...); se rompe en cuanto una pieza se fija sin limpiar ninguna línea. Un **T-spin** (rotar una pieza T hasta encajarla con al menos 3 de sus 4 esquinas ocupadas) da un bonus propio, incluso sin limpiar líneas. Dos **Tetris** (4 líneas) consecutivos activan el bonus **Back-to-Back** (×1.5 en el segundo y siguientes, mientras la cadena no se rompa con otro tipo de limpieza). Dejar el tablero completamente vacío tras una limpieza otorga el bonus **Perfect Clear**. Cada evento muestra un texto flotante sobre el tablero y un pitido sintetizado distinto (sin archivos de audio).
 - **Toggle de tema claro/oscuro**: modo oscuro por defecto, con un switch en el panel lateral que cambia a modo claro y recuerda la preferencia entre recargas (`localStorage`).
 - **Toggle de idioma español/inglés**: switch en el panel lateral que traduce todos los labels de la interfaz (marcadores, controles, overlay de pausa/game over) y recuerda la preferencia entre recargas (`localStorage`).
+- **Modo Desafío**: un tercer switch cambia del Tetris clásico infinito a una **campaña secuencial de 5 retos**, cada uno con su propia mecánica (tiempo límite, basura subiendo, bloques pre-colocados, piezas invisibles, rotación invertida). Ver la sección [Modo Desafío](#modo-desafío) para el detalle.
 
 ---
 
@@ -98,12 +100,33 @@ Después abre `http://localhost:8000` en el navegador.
 | `Espacio` | Hard drop (caída instantánea)     |
 | `P`       | Pausar / reanudar                 |
 
-También hay dos switches en la parte superior del panel lateral, controlados con mouse/touch:
+También hay tres switches en la parte superior del panel lateral, controlados con mouse/touch:
 
 - **Tema claro/oscuro**.
 - **Idioma español/inglés**: traduce en vivo todos los labels del panel (`SCORE`/`LINES`/`LEVEL`/`NEXT`/`CONTROLS`, la lista de controles) y los textos del overlay (`GAME OVER`, `PAUSA`, puntuación).
+- **Modo Clásico/Desafío**: cambia entre la partida infinita de siempre y la campaña de 5 retos (ver [Modo Desafío](#modo-desafío)).
 
-Ambas preferencias se guardan en `localStorage` (`theme` y `lang`) y se restauran al recargar la página.
+Las tres preferencias se guardan en `localStorage` (`theme`, `lang` y `mode`) y se restauran al recargar la página.
+
+---
+
+## Modo Desafío
+
+Activar el switch **MODO → Desafío** sustituye la partida infinita por una **campaña secuencial de 5 retos**. Se juega uno a la vez, en orden; al superarlo aparece un overlay **RETO SUPERADO** con el botón **Siguiente** que arranca el siguiente reto **sin reiniciar la puntuación ni las líneas acumuladas**. Al completar el quinto aparece **¡DESAFÍO COMPLETADO!**.
+
+Si se falla un reto (se agota el tiempo o el tablero se desborda), aparece **RETO FALLIDO** con el botón **Reintentar**, que repite ese mismo reto desde cero conservando la puntuación que ya se tenía — nunca hay que rehacer los retos ya superados.
+
+Los power-ups (bomba, rayo, tinte, gravedad, congelar) y las piezas no estándar (pentominós, single, hueca) siguen activos con normalidad durante toda la campaña.
+
+| # | Reto | Mecánica | Objetivo | Falla si... |
+| - | ---- | -------- | -------- | ----------- |
+| 1 | Limpieza rápida | Ninguna (Tetris normal) | Limpiar **40 líneas** | Se agotan los **2:00** minutos |
+| 2 | Basura | Una fila de basura gris sube desde abajo cada 10 s (empujando también la pieza en caída) | **Sobrevivir 60 s** | La basura desborda el tablero |
+| 3 | Bloques fijos | El tablero arranca con **6 filas** pre-colocadas (marrón, con huecos aleatorios) | Limpiar las 6 filas pre-colocadas | El tablero se desborda |
+| 4 | Invisible | Cada pieza que se fija se vuelve invisible ~0.4 s después (solo destella al caer) | Limpiar **10 líneas** | El tablero se desborda |
+| 5 | Rotación inversa | `↑`/`X` rota en sentido **antihorario** en vez de horario | Limpiar **15 líneas** | El tablero se desborda |
+
+El panel lateral muestra una sección **RETO** exclusiva de este modo, con el nombre del reto activo, el progreso hacia el objetivo y, si aplica, el tiempo restante.
 
 ---
 
@@ -256,6 +279,11 @@ Algunos parámetros fáciles de tunear en `game.js`:
 | `B2B_MULTIPLIER` | Multiplicador extra al encadenar 2+ Tetris seguidos | `1.5`        |
 | `PERFECT_CLEAR_BONUS` | Bonus por dejar el tablero vacío tras un clear, × nivel | `3000`        |
 | `TOAST_MS` | Duración del texto flotante de combo/T-spin/B2B/Perfect Clear | `900`        |
+| `GARBAGE_INTERVAL_MS` | Cada cuánto sube una fila de basura en el reto 2 | `10000`        |
+| `PRESET_ROWS` | Filas pre-colocadas al arrancar el reto 3 | `6`         |
+| `PRESET_HOLES` | Huecos por fila pre-colocada en el reto 3 | `3`         |
+| `INVISIBLE_REVEAL_MS` | Destello visible al fijar una pieza en el reto 4 antes de ocultarse | `400`        |
+| `CHALLENGES` | Definición de los 5 retos del Modo Desafío (objetivo, límite de tiempo, mecánica) | 5 retos             |
 
 > Si cambias `COLS`, `ROWS` o `BLOCK`, recuerda ajustar también `width` y `height` del `<canvas id="board">` en `index.html` para que coincida (`COLS × BLOCK` × `ROWS × BLOCK`).
 
