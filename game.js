@@ -18,6 +18,11 @@ const COLORS = [
   '#ec407a', // TINT - magenta (render-only, no PIECES[10])
   '#26a69a', // GRAVITY - teal (render-only, no PIECES[11])
   '#4fc3f7', // FREEZE - ice blue (render-only, no PIECES[12])
+  '#cddc39', // PLUS pentomino - lime
+  '#8d6e63', // U pentomino - brown
+  '#5c6bc0', // Y pentomino - indigo
+  '#fafafa', // SINGLE - casi blanco (recompensa)
+  '#37474f', // HOLLOW - gris azulado oscuro (reto)
 ];
 
 const BOMB_EVERY_LINES = 5;    // cada cuántas líneas se abre la ventana de bomba
@@ -39,6 +44,12 @@ const FREEZE_EVERY_LINES = 9;  // cada cuántas líneas se abre la ventana de co
 const FREEZE_CHANCE = 0.2;     // probabilidad por spawn dentro de la ventana
 const FREEZE_DURATION_MS = 5000; // duración de la pausa de caída automática
 
+const PENTOMINO_EVERY_LINES = 4; // cada cuántas líneas se abre la ventana de pentominós (+/U/Y)
+const PENTOMINO_CHANCE = 0.25;   // probabilidad por spawn dentro de la ventana
+
+const HOLLOW_EVERY_LINES = 12; // cada cuántas líneas se abre la ventana de la pieza hueca 3×3
+const HOLLOW_CHANCE = 0.15;    // probabilidad por spawn dentro de la ventana
+
 const PIECES = [
   null,
   [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]], // I
@@ -49,6 +60,15 @@ const PIECES = [
   [[6,0,0],[6,6,6],[0,0,0]],                  // J
   [[0,0,7],[7,7,7],[0,0,0]],                  // L
 ];
+
+// Piezas no estándar, con forma propia (no participan en el roll 1-7 normal).
+const SPECIAL_PIECES = {
+  plus:   [[0,13,0],[13,13,13],[0,13,0]],  // pentominó +
+  u:      [[14,0,14],[14,14,14]],          // pentominó U
+  y:      [[0,15],[15,15],[0,15],[0,15]],  // pentominó Y
+  single: [[16]],                          // 1×1, recompensa tras un Tetris
+  hollow: [[17,17,17],[17,0,17],[17,17,17]], // 3×3 hueca, reto
+};
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
 
@@ -121,7 +141,7 @@ const ctrlSoftDropEl = document.getElementById('ctrl-softdrop');
 const ctrlHardDropEl = document.getElementById('ctrl-harddrop');
 const ctrlPauseEl = document.getElementById('ctrl-pause');
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, currentLang, bombArmed, lightningArmed, tintArmed, gravityArmed, freezeArmed, freezeRemaining, flash, gravityAnim;
+let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, currentLang, bombArmed, lightningArmed, tintArmed, gravityArmed, freezeArmed, freezeRemaining, flash, gravityAnim, pentominoArmed, hollowArmed, forcedSingle;
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
@@ -154,7 +174,20 @@ function pieceCore(shape) {
   return best;
 }
 
+function randomSpecialShape(key) {
+  const shape = SPECIAL_PIECES[key].map(row => [...row]);
+  return {
+    type: key, shape,
+    bomb: false, lightning: false, tint: false, gravity: false, freeze: false,
+    x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0,
+  };
+}
+
 function randomPiece() {
+  if (forcedSingle) {
+    forcedSingle = false;
+    return randomSpecialShape('single');
+  }
   const type = Math.floor(Math.random() * 7) + 1;
   const shape = PIECES[type].map(row => [...row]);
   let bomb = false, lightning = false, tint = false, gravity = false, freeze = false;
@@ -173,6 +206,12 @@ function randomPiece() {
   } else if (freezeArmed && Math.random() < FREEZE_CHANCE) {
     freeze = true;
     freezeArmed = false;
+  } else if (pentominoArmed && Math.random() < PENTOMINO_CHANCE) {
+    pentominoArmed = false;
+    return randomSpecialShape(['plus', 'u', 'y'][Math.floor(Math.random() * 3)]);
+  } else if (hollowArmed && Math.random() < HOLLOW_CHANCE) {
+    hollowArmed = false;
+    return randomSpecialShape('hollow');
   }
   return { type, shape, bomb, lightning, tint, gravity, freeze, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
 }
@@ -236,6 +275,13 @@ function registerLinesCleared(cleared) {
   if (Math.floor(lines / FREEZE_EVERY_LINES) > Math.floor(prevLines / FREEZE_EVERY_LINES)) {
     freezeArmed = true;
   }
+  if (Math.floor(lines / PENTOMINO_EVERY_LINES) > Math.floor(prevLines / PENTOMINO_EVERY_LINES)) {
+    pentominoArmed = true;
+  }
+  if (Math.floor(lines / HOLLOW_EVERY_LINES) > Math.floor(prevLines / HOLLOW_EVERY_LINES)) {
+    hollowArmed = true;
+  }
+  if (cleared === 4) forcedSingle = true;
   score += (LINE_SCORES[cleared] || 0) * level;
   level = Math.floor(lines / 10) + 1;
   dropInterval = Math.max(100, 1000 - (level - 1) * 90);
@@ -612,6 +658,9 @@ function init() {
   gravityArmed = false;
   freezeArmed = false;
   freezeRemaining = 0;
+  pentominoArmed = false;
+  hollowArmed = false;
+  forcedSingle = false;
   flash = null;
   gravityAnim = null;
   dropInterval = 1000;
