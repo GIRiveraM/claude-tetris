@@ -51,6 +51,7 @@ Es una versión jugable del Tetris clásico con todas las mecánicas que esperar
 - **Pentominós + / U / Y**: cada 4 líneas se abre una ventana con 25 % de probabilidad de que la siguiente pieza sea uno de estos tres pentominós de 5 bloques (colores lima, marrón e índigo respectivamente), en vez de una de las 7 piezas estándar. Se sortea cuál de las tres sale.
 - **Pieza hueca 3×3 (reto)**: cada 12 líneas se abre otra ventana, más rara (15 % de probabilidad), en la que la siguiente pieza es un anillo de 8 bloques con el centro vacío (gris azulado oscuro) — más difícil de encajar por su tamaño.
 - **Pieza 1×1 (recompensa)**: al hacer un Tetris real (4 líneas completas de golpe), la siguiente pieza es **siempre** un único bloque 1×1 (casi blanco), con prioridad sobre cualquier otra ventana de power-up o pieza especial que estuviera abierta en ese momento.
+- **Modo combo y multiplicadores**: limpiar líneas en fijadas consecutivas multiplica la puntuación de esa limpieza (×1, ×2, ×3...); se rompe en cuanto una pieza se fija sin limpiar ninguna línea. Un **T-spin** (rotar una pieza T hasta encajarla con al menos 3 de sus 4 esquinas ocupadas) da un bonus propio, incluso sin limpiar líneas. Dos **Tetris** (4 líneas) consecutivos activan el bonus **Back-to-Back** (×1.5 en el segundo y siguientes, mientras la cadena no se rompa con otro tipo de limpieza). Dejar el tablero completamente vacío tras una limpieza otorga el bonus **Perfect Clear**. Cada evento muestra un texto flotante sobre el tablero y un pitido sintetizado distinto (sin archivos de audio).
 - **Toggle de tema claro/oscuro**: modo oscuro por defecto, con un switch en el panel lateral que cambia a modo claro y recuerda la preferencia entre recargas (`localStorage`).
 - **Toggle de idioma español/inglés**: switch en el panel lateral que traduce todos los labels de la interfaz (marcadores, controles, overlay de pausa/game over) y recuerda la preferencia entre recargas (`localStorage`).
 
@@ -148,6 +149,12 @@ Contiene toda la lógica del juego. A grandes rasgos:
   - **Single**: no usa ventana ni probabilidad — es determinista. `registerLinesCleared(cleared)` fija `forcedSingle = true` cuando `cleared === 4` (un Tetris real, 4 filas de golpe; esto solo puede venir de `clearLines()`, ya que `zapRow()` del rayo siempre llama con `cleared = 1`). En el siguiente `randomPiece()`, `forcedSingle` tiene prioridad absoluta y se consume sin tocar ninguna otra ventana.
   - Como cada pieza especial ya lleva su color (13–17) horneado directamente en `shape`, `merge()`, `draw()` y `drawNext()` no necesitan ningún caso especial: el mismo fallback `powerColor ?? shape[r][c]` que ya usan los power-ups pinta el color real de la celda cuando ningún flag está activo.
   - **Nota**: `dye()` (tinte) solo escanea colores `1–7` al buscar "el color más frecuente" — las celdas de piezas especiales (13–17) quedan fuera de su alcance a propósito, así que el tinte nunca las elige como objetivo.
+- **Modo combo** (`combo`, `b2bActive`, `lastActionWasRotate`): aplica **solo** al clear natural de `clearLines()`, no al `zapRow()` del rayo — ese es un efecto de power-up de un solo uso, no una limpieza fruto de encajar piezas, así que no alimenta ni rompe el combo/B2B.
+  - **Combo**: cada `lockPiece()` que no limpia ninguna línea pone `combo = 0`. Cada clear (`cleared > 0`) incrementa `combo` y multiplica el score de esa limpieza por el valor resultante (`LINE_SCORES[cleared] × nivel × combo`): el 1º clear de una racha puntúa ×1, el 2º ×2, el 3º ×3...
+  - **T-spin**: `lastActionWasRotate` seguido en `tryRotate()` (se pone `true` solo si el giro tuvo éxito) y se pone `false` al mover lateralmente (`ArrowLeft`/`ArrowRight`) o al generar una pieza nueva (`spawn()`) — el movimiento vertical (soft/hard drop, caída automática) no lo toca, igual que en el Tetris real. `checkTSpin()`, llamado en `lockPiece()` antes de `merge()`, exige que la pieza actual sea una T (`current.type === 3`) y que las 4 esquinas diagonales de su caja 3×3 tengan al menos 3 ocupadas (contando fuera del tablero como ocupado). Si hay T-spin, `clearLines(tspin)` usa `T_SPIN_SCORES[cleared]` en vez de `LINE_SCORES[cleared]` como base — incluso con `cleared === 0` se suma `T_SPIN_SCORES[0] × nivel` como bonus por el giro.
+  - **Back-to-Back (B2B)**: alcance limitado a Tetris→Tetris (no se combina con T-spin). Si el clear actual limpia 4 líneas y `b2bActive` ya estaba activo por el Tetris anterior, el score de esa limpieza se multiplica además por `B2B_MULTIPLIER` (`×1.5`); cualquier clear que no sea de 4 líneas apaga `b2bActive`.
+  - **Perfect Clear**: tras aplicar la limpieza, si el tablero completo queda vacío (`board.every(row => row.every(v => v === 0))`), se suma `PERFECT_CLEAR_BONUS × nivel` aparte, sin multiplicarse por combo/B2B.
+  - **Efectos**: `showToast(text)` guarda `{text, start}` en el global `toast`; `draw()` lo pinta como un rótulo semitransparente centrado sobre el tablero que se desvanece en `TOAST_MS` (mismo patrón timestamp+fade que `flash`/congelado, pero dibujado *después* de la pieza actual para quedar siempre encima). El texto combina las etiquetas que apliquen (`T-SPIN`, `BACK-TO-BACK`, `COMBO xN` desde `combo ≥ 2`, `PERFECT CLEAR!`). `playSfx(type, comboLevel)` sintetiza un pitido corto con la Web Audio API (`OscillatorNode` tipo `square`, ~150 ms, sin archivos externos): cada tipo de evento tiene su propia frecuencia base y el de combo además sube de tono con el nivel de combo. `ensureAudio()` crea el `AudioContext` de forma perezosa en el primer sonido real (siempre después de una tecla del jugador, así evita el bloqueo de autoplay de los navegadores) y si el navegador no lo soporta, `playSfx()` simplemente no hace nada.
 
 ### Flujo del juego
 
@@ -162,13 +169,15 @@ init()
      ├─ acumula dt
      ├─ si dt ≥ dropInterval → baja la pieza o llama a lockPiece()
      │     lockPiece()
+     │       ├─ tspin = checkTSpin()     → antes de merge(), regla de las 3 esquinas
      │       ├─ merge()
      │       ├─ si la pieza era bomba    → detonate()  → applyGravity()
      │       ├─ si la pieza era rayo     → zap()        → zapRow() o zapColumn()
      │       ├─ si la pieza era tinte    → dye()        → applyGravity()
      │       ├─ si la pieza era gravedad → triggerGravityEffect() → applyGravity() + gravityAnim
      │       ├─ si la pieza era congelar → freezeRemaining = 5000ms
-     │       ├─ clearLines()             → puede armar la próxima bomba/rayo/tinte/gravedad/congelar/pentominó/hueca
+     │       ├─ clearLines(tspin)        → combo/B2B/Perfect Clear + toast/sonido
+     │       │                              puede armar la próxima bomba/rayo/tinte/gravedad/congelar/pentominó/hueca
      │       │                              y, si limpió 4 filas de golpe, forzar el próximo single 1×1
      │       └─ spawn()                  → randomPiece() resuelve la prioridad: single forzado > power-ups > pentominó/hueca
      ├─ draw()  (grid + tablero + ghost + pieza actual)
@@ -243,6 +252,10 @@ Algunos parámetros fáciles de tunear en `game.js`:
 | `HOLLOW_EVERY_LINES` | Cada cuántas líneas se abre la ventana de la pieza hueca | `12`         |
 | `HOLLOW_CHANCE` | Probabilidad de hueca por pieza dentro de la ventana | `0.15`        |
 | `SPECIAL_PIECES` | Formas de las piezas no estándar (+, U, Y, single, hueca) | 5 formas             |
+| `T_SPIN_SCORES` | Bonus por T-spin según líneas limpiadas (0-3), × nivel | `[100,200,400,600]`   |
+| `B2B_MULTIPLIER` | Multiplicador extra al encadenar 2+ Tetris seguidos | `1.5`        |
+| `PERFECT_CLEAR_BONUS` | Bonus por dejar el tablero vacío tras un clear, × nivel | `3000`        |
+| `TOAST_MS` | Duración del texto flotante de combo/T-spin/B2B/Perfect Clear | `900`        |
 
 > Si cambias `COLS`, `ROWS` o `BLOCK`, recuerda ajustar también `width` y `height` del `<canvas id="board">` en `index.html` para que coincida (`COLS × BLOCK` × `ROWS × BLOCK`).
 
