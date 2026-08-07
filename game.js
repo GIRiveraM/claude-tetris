@@ -13,7 +13,31 @@ const COLORS = [
   '#e57373', // Z - red
   '#90caf9', // J - pale blue
   '#ffb74d', // L - orange
+  '#c62828', // BOMB - dark red (render-only, no PIECES[8])
+  '#29b6f6', // LIGHTNING - electric blue (render-only, no PIECES[9])
+  '#ec407a', // TINT - magenta (render-only, no PIECES[10])
+  '#26a69a', // GRAVITY - teal (render-only, no PIECES[11])
+  '#4fc3f7', // FREEZE - ice blue (render-only, no PIECES[12])
 ];
+
+const BOMB_EVERY_LINES = 5;    // cada cuántas líneas se abre la ventana de bomba
+const BOMB_CHANCE = 0.4;       // probabilidad por spawn dentro de la ventana
+const BOMB_CELL_SCORE = 50;    // puntos por celda destruida (× level)
+
+const LIGHTNING_EVERY_LINES = 7; // cada cuántas líneas se abre la ventana de rayo
+const LIGHTNING_CHANCE = 0.2;    // probabilidad por spawn dentro de la ventana
+const LIGHTNING_FLASH_MS = 220;  // duración del destello al limpiar fila/columna
+
+const TINT_EVERY_LINES = 8;    // cada cuántas líneas se abre la ventana de tinte
+const TINT_CHANCE = 0.2;       // probabilidad por spawn dentro de la ventana
+
+const GRAVITY_EVERY_LINES = 6; // cada cuántas líneas se abre la ventana de gravedad
+const GRAVITY_CHANCE = 0.2;    // probabilidad por spawn dentro de la ventana
+const GRAVITY_ANIM_MS = 350;   // duración de la animación de caída visible
+
+const FREEZE_EVERY_LINES = 9;  // cada cuántas líneas se abre la ventana de congelar
+const FREEZE_CHANCE = 0.2;     // probabilidad por spawn dentro de la ventana
+const FREEZE_DURATION_MS = 5000; // duración de la pausa de caída automática
 
 const PIECES = [
   null,
@@ -97,16 +121,60 @@ const ctrlSoftDropEl = document.getElementById('ctrl-softdrop');
 const ctrlHardDropEl = document.getElementById('ctrl-harddrop');
 const ctrlPauseEl = document.getElementById('ctrl-pause');
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, currentLang;
+let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, currentLang, bombArmed, lightningArmed, tintArmed, gravityArmed, freezeArmed, freezeRemaining, flash, gravityAnim;
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
 }
 
+function boundingBox(shape) {
+  let minR = shape.length, maxR = -1, minC = shape[0].length, maxC = -1;
+  for (let r = 0; r < shape.length; r++)
+    for (let c = 0; c < shape[r].length; c++)
+      if (shape[r][c]) {
+        if (r < minR) minR = r;
+        if (r > maxR) maxR = r;
+        if (c < minC) minC = c;
+        if (c > maxC) maxC = c;
+      }
+  return { minR, maxR, minC, maxC };
+}
+
+function pieceCore(shape) {
+  const { minR, maxR, minC, maxC } = boundingBox(shape);
+  const centerR = (minR + maxR) / 2;
+  const centerC = (minC + maxC) / 2;
+  let best = null, bestDist = Infinity;
+  for (let r = minR; r <= maxR; r++)
+    for (let c = minC; c <= maxC; c++)
+      if (shape[r][c]) {
+        const dist = (r - centerR) ** 2 + (c - centerC) ** 2;
+        if (dist < bestDist) { bestDist = dist; best = { r, c }; }
+      }
+  return best;
+}
+
 function randomPiece() {
   const type = Math.floor(Math.random() * 7) + 1;
   const shape = PIECES[type].map(row => [...row]);
-  return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
+  let bomb = false, lightning = false, tint = false, gravity = false, freeze = false;
+  if (bombArmed && Math.random() < BOMB_CHANCE) {
+    bomb = true;
+    bombArmed = false;
+  } else if (lightningArmed && Math.random() < LIGHTNING_CHANCE) {
+    lightning = true;
+    lightningArmed = false;
+  } else if (tintArmed && Math.random() < TINT_CHANCE) {
+    tint = true;
+    tintArmed = false;
+  } else if (gravityArmed && Math.random() < GRAVITY_CHANCE) {
+    gravity = true;
+    gravityArmed = false;
+  } else if (freezeArmed && Math.random() < FREEZE_CHANCE) {
+    freeze = true;
+    freezeArmed = false;
+  }
+  return { type, shape, bomb, lightning, tint, gravity, freeze, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
 }
 
 function collide(shape, ox, oy) {
@@ -150,6 +218,30 @@ function merge() {
         board[current.y + r][current.x + c] = current.shape[r][c];
 }
 
+function registerLinesCleared(cleared) {
+  const prevLines = lines;
+  lines += cleared;
+  if (Math.floor(lines / BOMB_EVERY_LINES) > Math.floor(prevLines / BOMB_EVERY_LINES)) {
+    bombArmed = true;
+  }
+  if (Math.floor(lines / LIGHTNING_EVERY_LINES) > Math.floor(prevLines / LIGHTNING_EVERY_LINES)) {
+    lightningArmed = true;
+  }
+  if (Math.floor(lines / TINT_EVERY_LINES) > Math.floor(prevLines / TINT_EVERY_LINES)) {
+    tintArmed = true;
+  }
+  if (Math.floor(lines / GRAVITY_EVERY_LINES) > Math.floor(prevLines / GRAVITY_EVERY_LINES)) {
+    gravityArmed = true;
+  }
+  if (Math.floor(lines / FREEZE_EVERY_LINES) > Math.floor(prevLines / FREEZE_EVERY_LINES)) {
+    freezeArmed = true;
+  }
+  score += (LINE_SCORES[cleared] || 0) * level;
+  level = Math.floor(lines / 10) + 1;
+  dropInterval = Math.max(100, 1000 - (level - 1) * 90);
+  updateHUD();
+}
+
 function clearLines() {
   let cleared = 0;
   for (let r = ROWS - 1; r >= 0; r--) {
@@ -160,13 +252,104 @@ function clearLines() {
       r++;
     }
   }
-  if (cleared) {
-    lines += cleared;
-    score += (LINE_SCORES[cleared] || 0) * level;
-    level = Math.floor(lines / 10) + 1;
-    dropInterval = Math.max(100, 1000 - (level - 1) * 90);
-    updateHUD();
+  if (cleared) registerLinesCleared(cleared);
+}
+
+function detonate(cx, cy) {
+  let destroyed = 0;
+  for (let r = cy - 1; r <= cy + 1; r++)
+    for (let c = cx - 1; c <= cx + 1; c++) {
+      if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
+      if (board[r][c]) { board[r][c] = 0; destroyed++; }
+    }
+  if (destroyed) {
+    score += destroyed * BOMB_CELL_SCORE * level;
+    applyGravity();
   }
+}
+
+function mostFrequentColor() {
+  const counts = new Array(8).fill(0);
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++) {
+      const v = board[r][c];
+      if (v) counts[v]++;
+    }
+  let best = 0, bestCount = 0;
+  for (let v = 1; v <= 7; v++)
+    if (counts[v] > bestCount) { bestCount = counts[v]; best = v; }
+  return bestCount ? best : null;
+}
+
+function dye() {
+  const target = mostFrequentColor();
+  if (!target) return;
+  let destroyed = 0;
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (board[r][c] === target) { board[r][c] = 0; destroyed++; }
+  if (destroyed) {
+    score += destroyed * BOMB_CELL_SCORE * level;
+    applyGravity();
+  }
+}
+
+function triggerFlash(type, index) {
+  flash = { type, index, start: performance.now() };
+}
+
+function zapRow(r) {
+  if (r < 0 || r >= ROWS) return;
+  board.splice(r, 1);
+  board.unshift(new Array(COLS).fill(0));
+  triggerFlash('row', r);
+  registerLinesCleared(1);
+}
+
+function zapColumn(c) {
+  if (c < 0 || c >= COLS) return;
+  let destroyed = 0;
+  for (let r = 0; r < ROWS; r++) {
+    if (board[r][c]) { board[r][c] = 0; destroyed++; }
+  }
+  triggerFlash('col', c);
+  if (destroyed) score += destroyed * BOMB_CELL_SCORE * level;
+}
+
+function zap(cx, cy) {
+  if (Math.random() < 0.5) zapRow(cy);
+  else zapColumn(cx);
+}
+
+function applyGravity() {
+  for (let c = 0; c < COLS; c++) {
+    let write = ROWS - 1;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (!board[r][c]) continue;
+      board[write][c] = board[r][c];
+      if (write !== r) board[r][c] = 0;
+      write--;
+    }
+  }
+}
+
+function computeGravityMoves() {
+  const moves = [];
+  for (let c = 0; c < COLS; c++) {
+    let write = ROWS - 1;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (!board[r][c]) continue;
+      if (write !== r) moves.push({ c, fromR: r, toR: write, color: board[r][c] });
+      write--;
+    }
+  }
+  return moves;
+}
+
+function triggerGravityEffect() {
+  const moves = computeGravityMoves();
+  applyGravity();
+  if (moves.length) gravityAnim = { moves, start: performance.now() };
 }
 
 function ghostY() {
@@ -194,9 +377,21 @@ function softDrop() {
 
 function lockPiece() {
   if (gameOver) return;
+  const bomb = current.bomb;
+  const lightning = current.lightning;
+  const tint = current.tint;
+  const gravity = current.gravity;
+  const freeze = current.freeze;
+  const core = (bomb || lightning || tint || gravity || freeze) ? pieceCore(current.shape) : null;
   merge();
+  if (bomb) detonate(current.x + core.c, current.y + core.r);
+  if (lightning) zap(current.x + core.c, current.y + core.r);
+  if (tint) dye();
+  if (gravity) triggerGravityEffect();
+  if (freeze) freezeRemaining = FREEZE_DURATION_MS;
   clearLines();
   spawn();
+  updateHUD();
 }
 
 function spawn() {
@@ -226,6 +421,15 @@ function drawBlock(context, x, y, colorIndex, size, alpha) {
   context.globalAlpha = 1;
 }
 
+function drawPowerIcon(context, x, y, size, icon, alpha) {
+  context.globalAlpha = alpha ?? 1;
+  context.font = `${Math.floor(size * 0.7)}px serif`;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(icon, x * size + size / 2, y * size + size / 2 + 1);
+  context.globalAlpha = 1;
+}
+
 function drawGrid() {
   ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue('--grid-color').trim();
   ctx.lineWidth = 0.5;
@@ -247,46 +451,104 @@ function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGrid();
 
+  // animación de caída por gravedad
+  let gravitySkip = null;
+  if (gravityAnim) {
+    const elapsed = performance.now() - gravityAnim.start;
+    if (elapsed >= GRAVITY_ANIM_MS) {
+      gravityAnim = null;
+    } else {
+      gravitySkip = new Set(gravityAnim.moves.map(m => `${m.toR},${m.c}`));
+    }
+  }
+
   // board
   for (let r = 0; r < ROWS; r++)
-    for (let c = 0; c < COLS; c++)
+    for (let c = 0; c < COLS; c++) {
+      if (gravitySkip && gravitySkip.has(`${r},${c}`)) continue;
       drawBlock(ctx, c, r, board[r][c], BLOCK);
+    }
+
+  if (gravitySkip) {
+    const progress = (performance.now() - gravityAnim.start) / GRAVITY_ANIM_MS;
+    const eased = 1 - Math.pow(1 - progress, 2);
+    for (const m of gravityAnim.moves) {
+      const y = m.fromR + (m.toR - m.fromR) * eased;
+      drawBlock(ctx, m.c, y, m.color, BLOCK);
+    }
+  }
+
+  // destello del rayo
+  if (flash) {
+    const elapsed = performance.now() - flash.start;
+    if (elapsed < LIGHTNING_FLASH_MS) {
+      ctx.globalAlpha = (1 - elapsed / LIGHTNING_FLASH_MS) * 0.85;
+      ctx.fillStyle = '#e1f5fe';
+      if (flash.type === 'row') {
+        ctx.fillRect(0, flash.index * BLOCK, COLS * BLOCK, BLOCK);
+      } else {
+        ctx.fillRect(flash.index * BLOCK, 0, BLOCK, ROWS * BLOCK);
+      }
+      ctx.globalAlpha = 1;
+    } else {
+      flash = null;
+    }
+  }
+
+  // congelado activo
+  if (freezeRemaining) {
+    ctx.globalAlpha = 0.12;
+    ctx.fillStyle = '#4fc3f7';
+    ctx.fillRect(0, 0, COLS * BLOCK, ROWS * BLOCK);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#e1f5fe';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(`❄️ ${(freezeRemaining / 1000).toFixed(1)}s`, (COLS * BLOCK) / 2, 6);
+  }
 
   // ghost
   const gy = ghostY();
+  const powerColor = current.bomb ? 8 : current.lightning ? 9 : current.tint ? 10 : current.gravity ? 11 : current.freeze ? 12 : null;
+  const powerIcon = current.bomb ? '💣' : current.lightning ? '⚡' : current.tint ? '🎨' : current.gravity ? '⬇️' : current.freeze ? '❄️' : null;
+  const core = powerColor ? pieceCore(current.shape) : null;
   for (let r = 0; r < current.shape.length; r++)
     for (let c = 0; c < current.shape[r].length; c++)
-      if (current.shape[r][c])
-        drawBlock(ctx, current.x + c, gy + r, current.shape[r][c], BLOCK, 0.2);
+      if (current.shape[r][c]) {
+        drawBlock(ctx, current.x + c, gy + r, powerColor ?? current.shape[r][c], BLOCK, 0.2);
+        if (core && r === core.r && c === core.c) drawPowerIcon(ctx, current.x + c, gy + r, BLOCK, powerIcon, 0.2);
+      }
 
   // current piece
   for (let r = 0; r < current.shape.length; r++)
-    for (let c = 0; c < current.shape[r].length; c++)
-      drawBlock(ctx, current.x + c, current.y + r, current.shape[r][c], BLOCK);
+    for (let c = 0; c < current.shape[r].length; c++) {
+      if (!current.shape[r][c]) continue;
+      drawBlock(ctx, current.x + c, current.y + r, powerColor ?? current.shape[r][c], BLOCK);
+      if (core && r === core.r && c === core.c) drawPowerIcon(ctx, current.x + c, current.y + r, BLOCK, powerIcon);
+    }
 }
 
 function drawNext() {
   const NB = 30;
   nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
   const shape = next.shape;
-  let minR = shape.length, maxR = -1, minC = shape[0].length, maxC = -1;
-  for (let r = 0; r < shape.length; r++)
-    for (let c = 0; c < shape[r].length; c++)
-      if (shape[r][c]) {
-        if (r < minR) minR = r;
-        if (r > maxR) maxR = r;
-        if (c < minC) minC = c;
-        if (c > maxC) maxC = c;
-      }
+  const { minR, maxR, minC, maxC } = boundingBox(shape);
   const width = maxC - minC + 1;
   const height = maxR - minR + 1;
   const offXpx = (nextCanvas.width - width * NB) / 2 - minC * NB;
   const offYpx = (nextCanvas.height - height * NB) / 2 - minR * NB;
+  const powerColor = next.bomb ? 8 : next.lightning ? 9 : next.tint ? 10 : next.gravity ? 11 : next.freeze ? 12 : null;
+  const powerIcon = next.bomb ? '💣' : next.lightning ? '⚡' : next.tint ? '🎨' : next.gravity ? '⬇️' : next.freeze ? '❄️' : null;
+  const core = powerColor ? pieceCore(shape) : null;
   nextCtx.save();
   nextCtx.translate(offXpx, offYpx);
   for (let r = 0; r < shape.length; r++)
-    for (let c = 0; c < shape[r].length; c++)
-      drawBlock(nextCtx, c, r, shape[r][c], NB);
+    for (let c = 0; c < shape[r].length; c++) {
+      if (!shape[r][c]) continue;
+      drawBlock(nextCtx, c, r, powerColor ?? shape[r][c], NB);
+      if (core && r === core.r && c === core.c) drawPowerIcon(nextCtx, c, r, NB, powerIcon);
+    }
   nextCtx.restore();
 }
 
@@ -319,13 +581,17 @@ function loop(ts) {
   if (paused || gameOver) return;
   const dt = ts - lastTime;
   lastTime = ts;
-  dropAccum += dt;
-  if (dropAccum >= dropInterval) {
-    dropAccum = 0;
-    if (!collide(current.shape, current.x, current.y + 1)) {
-      current.y++;
-    } else {
-      lockPiece();
+  if (freezeRemaining > 0) {
+    freezeRemaining = Math.max(0, freezeRemaining - dt);
+  } else {
+    dropAccum += dt;
+    if (dropAccum >= dropInterval) {
+      dropAccum = 0;
+      if (!collide(current.shape, current.x, current.y + 1)) {
+        current.y++;
+      } else {
+        lockPiece();
+      }
     }
   }
   draw();
@@ -340,6 +606,14 @@ function init() {
   level = 1;
   paused = false;
   gameOver = false;
+  bombArmed = false;
+  lightningArmed = false;
+  tintArmed = false;
+  gravityArmed = false;
+  freezeArmed = false;
+  freezeRemaining = 0;
+  flash = null;
+  gravityAnim = null;
   dropInterval = 1000;
   dropAccum = 0;
   lastTime = performance.now();
